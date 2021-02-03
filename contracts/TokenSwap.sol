@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.7.3;
+pragma solidity ^0.6.12;
 
 // A partial ERC20 interface.
 interface IERC20 {
@@ -8,24 +8,16 @@ interface IERC20 {
     function transfer(address to, uint256 amount) external returns (bool);
 }
 
-// A partial WETH interfaec.
-interface IWETH is IERC20 {
-    function deposit() external payable;
-}
-
 // Demo contract that swaps its ERC20 balance for another ERC20.
 // NOT to be used in production.
 contract TokenSwap {
 
     event BoughtTokens(IERC20 sellToken, IERC20 buyToken, uint256 boughtAmount);
 
-    // The WETH contract.
-    IWETH public immutable WETH;
     // Creator of this contract.
     address public owner;
 
-    constructor(IWETH weth) {
-        WETH = weth;
+    constructor() public {
         owner = msg.sender;
     }
 
@@ -51,14 +43,6 @@ contract TokenSwap {
         onlyOwner
     {
         msg.sender.transfer(amount);
-    }
-
-    // Transfer ETH into this contract and wrap it into WETH.
-    function depositETH()
-        external
-        payable
-    {
-        WETH.deposit{value: msg.value}();
     }
 
     // Swaps ERC20->ERC20 tokens held by this contract using a 0x-API quote.
@@ -95,5 +79,17 @@ contract TokenSwap {
         // Use our current buyToken balance to determine how much we've bought.
         boughtAmount = buyToken.balanceOf(address(this)) - boughtAmount;
         emit BoughtTokens(sellToken, buyToken, boughtAmount);
+    }
+
+    function debugBalanceToken(IERC20 token)
+        external view returns (uint256 balance)
+    {
+        balance = token.balanceOf(address(this));
+    }
+
+    function debugBalanceTokenOfSender(IERC20 token)
+        external view returns (uint256 balance)
+    {
+        balance = token.balanceOf(msg.sender);
     }
 }
