@@ -1,3 +1,6 @@
+const HDWalletProvider = require('@truffle/hdwallet-provider');
+require('dotenv').config();
+
 module.exports = {
   networks: {
     development: {
@@ -7,6 +10,23 @@ module.exports = {
       gas: 5000000,
       gasPrice: 5e9,
       networkId: '*',
+    },
+    'forked-mainnet': {
+      protocol: 'http',
+      host: 'localhost',
+      port: 7545,
+      skipDryRun: true,
+      gas: 4000000,
+      gasPrice: 40e9,
+      networkId: 1,
+    },
+    mainnet: {
+      provider: function() {
+        return new HDWalletProvider([process.env.SECRET_KEY], process.env.INFURA_MAIN_URL);
+      },
+      network_id: 1,
+      gas: 4000000,
+      gasPrice: 40e9 // 40 [GWei]
     },
   },
 };
