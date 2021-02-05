@@ -15,12 +15,9 @@ module.exports = {
       provider: function() {
         return new HDWalletProvider([process.env.SECRET_KEY], 'http://localhost:7545');
       },
-      // protocol: 'http',
-      // host: 'localhost',
-      // port: 7545,
       skipDryRun: true,
       gas: 4000000,
-      gasPrice: 40e9,
+      gasPrice: 5e9,
       networkId: 5353,
     },
     // mainnet: {

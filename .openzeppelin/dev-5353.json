@@ -4,11 +4,6 @@
   "proxies": {
     "defi-arb-bot-contracts/TokenSwap": [
       {
-        "address": "0x66A01FE799BaC0cd438D7796Df98d76D9d1d469F",
-        "kind": "NonProxy",
-        "bytecodeHash": "ddc416e4021397a697210cd16e2b302554213211f440158de5ccf10a4ab6866f"
-      },
-      {
         "address": "0x9f61C3a810707FA7bda4D659ddB844AC5547d4F7",
         "kind": "NonProxy",
         "bytecodeHash": "ddc416e4021397a697210cd16e2b302554213211f440158de5ccf10a4ab6866f"

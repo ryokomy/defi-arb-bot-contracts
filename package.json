@@ -13,7 +13,8 @@
   },
   "devDependencies": {},
   "scripts": {
-    "start-ganache-and-fork-main": "ganache-cli -f $(grep INFURA_MAIN_URL .env | cut -d '=' -f2) -i 5353 -p 7545",
+    "setup-forked-main": "sh tools/setup-forked-main.sh",
+    "deploy-on-forked-main": "sh tools/deploy-on-forked-main.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

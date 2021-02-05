@@ -1,6 +1,8 @@
 {
   "manifestVersion": "2.2",
-  "contracts": {},
+  "contracts": {
+    "TokenSwap": "TokenSwap"
+  },
   "dependencies": {
     "@openzeppelin/contracts-ethereum-package": "^3.0.0"
   },

@@ -92,4 +92,5 @@ contract TokenSwap {
     {
         balance = token.balanceOf(msg.sender);
     }
+
 }
