@@ -4,6 +4,7 @@ pragma solidity ^0.6.12;
 // A partial ERC20 interface.
 interface IERC20 {
     function balanceOf(address owner) external view returns (uint256);
+    function allowance(address owner, address spender) external view returns(uint256);
     function approve(address spender, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
 }
@@ -12,6 +13,8 @@ interface IERC20 {
 // NOT to be used in production.
 contract TokenSwap {
 
+    event Arbitrage(IERC20 orgToken, IERC20 viaToken, uint256 initialOrgTokenAmount, uint256 initialViaTokenAmount, uint256 finalOrgTokenAmount, uint256 finalViaTokenAmount);
+    // event Arbitrage(IERC20 orgToken, IERC20 viaToken, uint256 initialOrgTokenAmount, uint256 initialViaTokenAmount, uint256 initialEthAmount, uint256 finalOrgTokenAmount, uint256 finalViaTokenAmount, uint256 finalEthAmount);
     event BoughtTokens(IERC20 sellToken, IERC20 buyToken, uint256 boughtAmount);
 
     // Creator of this contract.
@@ -45,6 +48,51 @@ contract TokenSwap {
         msg.sender.transfer(amount);
     }
 
+    function arbitrage(
+        IERC20 orgToken,
+        IERC20 viaToken,
+        address forwardSpender,
+        address payable forwardSwapTarget,
+        bytes calldata forwardSwapCallData,
+        address inverseSpender,
+        address payable inverseSwapTarget,
+        bytes calldata inverseSwapCallData
+    )
+        external
+        onlyOwner
+        payable
+    {
+        // initial value
+        uint256 initialOrgTokenAmount = orgToken.balanceOf(address(this));
+        uint256 initialViaTokenAmount = viaToken.balanceOf(address(this));
+
+        // forward approve
+        if(orgToken.allowance(address(this), forwardSpender) != uint256(-1)) {
+            require(orgToken.approve(forwardSpender, uint256(-1)));
+        }
+        // forward swap
+        {
+            (bool forwardSuccess,) = forwardSwapTarget.call{value: msg.value}(forwardSwapCallData);
+            require(forwardSuccess, 'FORWARD_SWAP_CALL_FAILED');
+        }
+        // inverse approve
+        if(viaToken.allowance(address(this), inverseSpender) != uint256(-1)) {
+            require(viaToken.approve(inverseSpender, uint256(-1)));
+        }
+        // inverse swap
+        {
+            (bool inverseSuccess,) = inverseSwapTarget.call{value: msg.value}(inverseSwapCallData);
+            require(inverseSuccess, 'INVERSE_SWAP_CALL_FAILED');
+        }
+
+        // final value
+        uint256 finalOrgTokenAmount = orgToken.balanceOf(address(this));
+        uint256 finalViaTokenAmount = viaToken.balanceOf(address(this));
+
+        // event
+        emit Arbitrage(orgToken, viaToken, initialOrgTokenAmount, initialViaTokenAmount, finalOrgTokenAmount, finalViaTokenAmount);
+    }
+
     // Swaps ERC20->ERC20 tokens held by this contract using a 0x-API quote.
     function fillQuote(
         // The `sellTokenAddress` field from the API response.
@@ -58,7 +106,7 @@ contract TokenSwap {
         // The `data` field from the API response.
         bytes calldata swapCallData
     )
-        external
+        public
         onlyOwner
         payable // Must attach ETH equal to the `value` field from the API response.
     {
