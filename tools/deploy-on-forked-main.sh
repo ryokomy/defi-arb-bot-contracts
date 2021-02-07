@@ -18,6 +18,6 @@ npx oz compile
 
 # deploy TokenSwap
 printf "\e[$outputColor;1m"
-printf "\ncommand: npx oz deploy --kind \"regular\" TookenSwap\n"
+printf "\ncommand: npx oz deploy --kind \"regular\" TookenSwap \"$(grep LendingPoolAddressesProvider .env | cut -d '=' -f2)\"\n"
 printf "\e[m"
-npx oz deploy --network $network --from $owner --kind "regular" TokenSwap
+npx oz deploy --network $network --from $owner --kind "regular" TokenSwap "$(grep LendingPoolAddressesProvider .env | cut -d '=' -f2)"

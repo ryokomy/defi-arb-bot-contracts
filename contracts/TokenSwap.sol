@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.6.12;
 
+import { FlashLoanReceiverBase } from "../submodules/aave-protocol-v2/contracts/flashloan/base/FlashLoanReceiverBase.sol";
+import { ILendingPool } from "../submodules/aave-protocol-v2/contracts/interfaces/ILendingPool.sol";
+import { ILendingPoolAddressesProvider } from "../submodules/aave-protocol-v2/contracts/interfaces/ILendingPoolAddressesProvider.sol";
+
 // A partial ERC20 interface.
 interface IERC20 {
     function balanceOf(address owner) external view returns (uint256);
@@ -11,16 +15,30 @@ interface IERC20 {
 
 // Demo contract that swaps its ERC20 balance for another ERC20.
 // NOT to be used in production.
-contract TokenSwap {
+contract TokenSwap is FlashLoanReceiverBase {
 
-    event Arbitrage(IERC20 orgToken, IERC20 viaToken, uint256 initialOrgTokenAmount, uint256 initialViaTokenAmount, uint256 finalOrgTokenAmount, uint256 finalViaTokenAmount);
-    // event Arbitrage(IERC20 orgToken, IERC20 viaToken, uint256 initialOrgTokenAmount, uint256 initialViaTokenAmount, uint256 initialEthAmount, uint256 finalOrgTokenAmount, uint256 finalViaTokenAmount, uint256 finalEthAmount);
-    event BoughtTokens(IERC20 sellToken, IERC20 buyToken, uint256 boughtAmount);
+    event Arbitrage(IERC20 orgToken, uint256 flashLoanAmount, IERC20 viaToken, uint256 initialOrgTokenAmount, uint256 initialViaTokenAmount, uint256 finalOrgTokenAmount, uint256 finalViaTokenAmount);
 
     // Creator of this contract.
     address public owner;
 
-    constructor() public {
+    // Storage
+    uint256 initialOrgTokenAmount;
+    uint256 initialViaTokenAmount;
+
+    IERC20 orgToken;
+    uint256 flashLoanAmount;
+    IERC20 viaToken;
+    address forwardSpender;
+    address payable forwardSwapTarget;
+    bytes forwardSwapCallData;
+    address inverseSpender;
+    address payable inverseSwapTarget;
+    bytes inverseSwapCallData;
+    uint256 msgValue;
+
+
+    constructor(ILendingPoolAddressesProvider _addressProvider) FlashLoanReceiverBase(_addressProvider) public {
         owner = msg.sender;
     }
 
@@ -48,23 +66,20 @@ contract TokenSwap {
         msg.sender.transfer(amount);
     }
 
-    function arbitrage(
-        IERC20 orgToken,
-        IERC20 viaToken,
-        address forwardSpender,
-        address payable forwardSwapTarget,
-        bytes calldata forwardSwapCallData,
-        address inverseSpender,
-        address payable inverseSwapTarget,
-        bytes calldata inverseSwapCallData
+    function executeOperation(
+        address[] calldata assets,
+        uint256[] calldata amounts,
+        uint256[] calldata premiums,
+        address initiator,
+        bytes calldata params
     )
         external
-        onlyOwner
-        payable
+        override
+        returns (bool)
     {
-        // initial value
-        uint256 initialOrgTokenAmount = orgToken.balanceOf(address(this));
-        uint256 initialViaTokenAmount = viaToken.balanceOf(address(this));
+        // approve lending pool
+        uint amountOwing = amounts[0].add(premiums[0]);
+        IERC20(assets[0]).approve(address(LENDING_POOL), amountOwing);
 
         // forward approve
         if(orgToken.allowance(address(this), forwardSpender) != uint256(-1)) {
@@ -72,7 +87,7 @@ contract TokenSwap {
         }
         // forward swap
         {
-            (bool forwardSuccess,) = forwardSwapTarget.call{value: msg.value}(forwardSwapCallData);
+            (bool forwardSuccess,) = forwardSwapTarget.call{value: msgValue}(forwardSwapCallData);
             require(forwardSuccess, 'FORWARD_SWAP_CALL_FAILED');
         }
         // inverse approve
@@ -81,64 +96,114 @@ contract TokenSwap {
         }
         // inverse swap
         {
-            (bool inverseSuccess,) = inverseSwapTarget.call{value: msg.value}(inverseSwapCallData);
+            (bool inverseSuccess,) = inverseSwapTarget.call{value: msgValue}(inverseSwapCallData);
             require(inverseSuccess, 'INVERSE_SWAP_CALL_FAILED');
         }
 
         // final value
-        uint256 finalOrgTokenAmount = orgToken.balanceOf(address(this));
+        uint256 finalOrgTokenAmount = orgToken.balanceOf(address(this)).sub(amountOwing);
         uint256 finalViaTokenAmount = viaToken.balanceOf(address(this));
 
         // event
-        emit Arbitrage(orgToken, viaToken, initialOrgTokenAmount, initialViaTokenAmount, finalOrgTokenAmount, finalViaTokenAmount);
+        emit Arbitrage(orgToken, flashLoanAmount, viaToken, initialOrgTokenAmount, initialViaTokenAmount, finalOrgTokenAmount, finalViaTokenAmount);
+
+        return true;
     }
 
-    // Swaps ERC20->ERC20 tokens held by this contract using a 0x-API quote.
-    function fillQuote(
-        // The `sellTokenAddress` field from the API response.
-        IERC20 sellToken,
-        // The `buyTokenAddress` field from the API response.
-        IERC20 buyToken,
-        // The `allowanceTarget` field from the API response.
-        address spender,
-        // The `to` field from the API response.
-        address payable swapTarget,
-        // The `data` field from the API response.
-        bytes calldata swapCallData
+
+    function arbitrage(
+        IERC20 _orgToken,
+        uint256 _flashLoanAmount,
+        IERC20 _viaToken,
+        address _forwardSpender,
+        address payable _forwardSwapTarget,
+        bytes calldata _forwardSwapCallData,
+        address _inverseSpender,
+        address payable _inverseSwapTarget,
+        bytes calldata _inverseSwapCallData
     )
-        public
+        external
         onlyOwner
-        payable // Must attach ETH equal to the `value` field from the API response.
+        payable
     {
-        // Track our balance of the buyToken to determine how much we've bought.
-        uint256 boughtAmount = buyToken.balanceOf(address(this));
+        // initial value
+        initialOrgTokenAmount = _orgToken.balanceOf(address(this));
+        initialViaTokenAmount = _viaToken.balanceOf(address(this));
 
-        // Give `spender` an infinite allowance to spend this contract's `sellToken`.
-        // Note that for some tokens (e.g., USDT, KNC), you must first reset any existing
-        // allowance to 0 before being able to update it.
-        require(sellToken.approve(spender, uint256(-1)));
-        // Call the encoded swap function call on the contract at `swapTarget`,
-        // passing along any ETH attached to this function call to cover protocol fees.
-        (bool success,) = swapTarget.call{value: msg.value}(swapCallData);
-        require(success, 'SWAP_CALL_FAILED');
-        // Refund any unspent protocol fees to the sender.
-        msg.sender.transfer(address(this).balance);
+        // Save parameters
+        saveParameters(
+            _orgToken,
+            _flashLoanAmount,
+            _viaToken,
+            _forwardSpender,
+            _forwardSwapTarget,
+            _forwardSwapCallData,
+            _inverseSpender,
+            _inverseSwapTarget,
+            _inverseSwapCallData            
+        );
+        msgValue = msg.value;
 
-        // Use our current buyToken balance to determine how much we've bought.
-        boughtAmount = buyToken.balanceOf(address(this)) - boughtAmount;
-        emit BoughtTokens(sellToken, buyToken, boughtAmount);
+        // FlashLoan
+        flashLoanCall(_orgToken, _flashLoanAmount);
     }
 
-    function debugBalanceToken(IERC20 token)
-        external view returns (uint256 balance)
+    function saveParameters(
+        IERC20 _orgToken,
+        uint256 _flashLoanAmount,
+        IERC20 _viaToken,
+        address _forwardSpender,
+        address payable _forwardSwapTarget,
+        bytes calldata _forwardSwapCallData,
+        address _inverseSpender,
+        address payable _inverseSwapTarget,
+        bytes calldata _inverseSwapCallData
+    )
+        private
+        onlyOwner
     {
-        balance = token.balanceOf(address(this));
+        orgToken = _orgToken;
+        flashLoanAmount = _flashLoanAmount;
+        viaToken = _viaToken;
+        forwardSpender = _forwardSpender;
+        forwardSwapTarget = _forwardSwapTarget;
+        forwardSwapCallData = _forwardSwapCallData;
+        inverseSpender = _inverseSpender;
+        inverseSwapTarget = _inverseSwapTarget;
+        inverseSwapCallData = _inverseSwapCallData;
     }
 
-    function debugBalanceTokenOfSender(IERC20 token)
-        external view returns (uint256 balance)
-    {
-        balance = token.balanceOf(msg.sender);
-    }
+    function flashLoanCall(
+        IERC20 _token,
+        uint256 _amount
+    )
+        private
+        onlyOwner
+    {        
+        address receiverAddress = address(this);
 
+        address[] memory assets = new address[](1);
+        assets[0] = address(_token);
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = _amount;
+
+        // 0 = no debt, 1 = stable, 2 = variable
+        uint256[] memory modes = new uint256[](2);
+        modes[0] = 0;
+
+        address onBehalfOf = address(this);
+        bytes memory params = "";
+        uint16 referralCode = 0;
+
+        LENDING_POOL.flashLoan(
+            receiverAddress,
+            assets,
+            amounts,
+            modes,
+            onBehalfOf,
+            params,
+            referralCode
+        );
+    }
 }
